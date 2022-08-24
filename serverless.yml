@@ -1,5 +1,5 @@
 ---
-service: serverless-react-boilerplate
+service: serverlessapp
 frameworkVersion: "3"
 useDotenv: true
 variablesResolutionMode: 20210326
@@ -9,30 +9,44 @@ disabledDeprecations:
 provider:
   name: aws
   runtime: nodejs12.x
-  region: ${opt:region, 'us-east-1'}
-  stage: ${opt:stage, 'dev'}
+  region: ${env:region, 'us-east-1'}
+  stage: ${env:stage, 'dev'}
   memorySize: 512
   timeout: 6
   logRetentionInDays: 7
   lambdaHashingVersion: 20201221 # for upcoming Serverless v3
 
+  vpc:
+    securityGroupIds:
+      - ${env:security_group, ""}
+    subnetIds:
+      - ${env:subnet_1, ""}
+      - ${env:subnet_2, ""}
+  role: ${env:lambda_role_arn, ""}
+
   apiGateway:
-    shouldStartNameWithService: true # for upcoming Serverless v3
+    restApiId: ${env:rest_api_id}
+    restApiRootResourceId: ${env:rest_api_root_resource_id}
+    minimumCompressionSize: 1000
+
+  deploymentBucket:
+    name: ${env:s3_bucket}
+  cfnRole: ${env:cloudformation_role}
 
   environment:
     SERVERLESS_PROJECT: ${self:service}
     SERVERLESS_REGION: ${self:provider.region}
     SERVERLESS_STAGE: ${self:provider.stage}
 
-    APP_DIST_URL: ${self:custom.distBucketUrl.${self:provider.region}, self:custom.distBucketUrl.default}
-    APP_PUBLIC_URL: ${self:custom.distBucketUrl.${self:provider.region}, self:custom.distBucketUrl.default}
+    APP_DIST_URL: ${env:dist_bucket_url}
+    APP_PUBLIC_URL: ${env:dist_bucket_url}
     APIGATEWAY_URL:
       Fn::Join:
         - ""
         - - https://
-          - Ref: ApiGatewayRestApi
+          - ${env:rest_api_id}
           - .execute-api.
-          - Ref: AWS::Region
+          - ${env:region}
           - .amazonaws.com/
           - ${self:provider.stage}
 
@@ -57,22 +71,6 @@ functions:
           cors: true
 
 custom:
-  distBucketUrl:
-    us-east-1:
-      # us-east-1 uses a different URL format than the other regions
-      Fn::Join:
-        - ""
-        - - https://s3.amazonaws.com/
-          - Ref: DistBucket
-    default:
-      # All other regions
-      Fn::Join:
-        - ""
-        - - https://s3-
-          - Ref: AWS::Region
-          - .amazonaws.com/
-          - Ref: DistBucket
-
   scripts:
     hooks:
       # Build the client-side script before packaging backend code
@@ -86,8 +84,7 @@ custom:
     # Automatically copy distribution folder to S3 stopped working; do it manually (see `scripts.hooks.deploy:finalize`)
     auto: false
     targets:
-      - bucket:
-          Ref: DistBucket
+      - bucket: ${env:s3_bucket}
         acl: public-read
         files:
           - source: dist/
@@ -102,42 +99,3 @@ custom:
     httpPort: 3000
     lambdaPort: 3002
 
-resources:
-  Resources:
-    # Customize the API Gateway resource
-    ApiGatewayRestApi:
-      Type: AWS::ApiGateway::RestApi
-      Properties:
-        # Enable gzip compression
-        MinimumCompressionSize: 1000
-
-    # S3 Bucket for the distribution bundles
-    DistBucket:
-      Type: AWS::S3::Bucket
-      DeletionPolicy: Delete
-      Properties:
-        CorsConfiguration:
-          CorsRules:
-            - AllowedHeaders:
-                - "*"
-              AllowedMethods:
-                - "GET"
-              AllowedOrigins:
-                - Fn::Join:
-                    - ""
-                    - - https://
-                      - Ref: ApiGatewayRestApi
-                      - .execute-api.
-                      - Ref: AWS::Region
-                      - .amazonaws.com
-              MaxAge: 3000
-
-  Outputs:
-    ApiGatewayRestApi:
-      Description: API Gateway Endpoint
-      Value:
-        Ref: ApiGatewayRestApi
-    DistBucket:
-      Description: Distribution S3 Bucket
-      Value:
-        Ref: DistBucket
